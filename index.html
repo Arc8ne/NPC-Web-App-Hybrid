@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>NSPAC Web App</title>
+    <style>
+      body {
+        font-family: Gordita, Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+      }
+
+      * {
+        margin: 0px;
+      }
+
+      #root {
+        padding: 8px;
+      }
+    </style>
+  </head>
+  <body id="root">
+    <script src="https://unpkg.com/mithril/mithril.js"></script>
+
+    <!-- PDF.js Core layer -->
+    <script type="module" src="https://unpkg.com/pdfjs-dist/build/pdf.worker.mjs"></script>
+    <!-- PDF.js Display layer -->
+    <script type="module" src="https://unpkg.com/pdfjs-dist/build/pdf.mjs"></script>
+
+    <script>
+      let PdfViewer = {
+        pdf: null,
+        view: function() {
+          let FileSelectionDialog = {
+            selectionModes: ["Specify a file path", "Drag & drop a file"],
+            selectionMode: undefined,
+            view: function() {
+              return m(
+                "dialog",
+                [
+                  m(
+                    "div",
+                    [
+                      m("p", "Selection mode:"),
+                      m(
+                        "select",
+                        {
+                          onchange: function (selectedSelectionMode) {
+                            self.selectionMode = selectedSelectionMode;
+                          }
+                        },
+                        self.selectionModes.map(
+                          option => m("option", option)
+                        )
+                      ),
+                      self.selectionMode == self.selectionModes[0] ? m(
+                        "",
+                        m("p", "File path:"),
+                        m(
+                          "input",
+                          {
+                            type: "text"
+                          }
+                        )
+                      ) : m("")
+                    ]
+                  )
+                ]
+              );
+            }
+          };
+          FileSelectionDialog.selectionMode = FileSelectionDialog.selectionModes[0];
+
+          return m(
+            ".pdf-viewer",
+            [
+              m("h1", "PDF viewer"),
+              self.pdf == null ? m(
+                "button",
+                {
+                  onmousedown: function() {
+                    // let selectedPdfFileHandle = await window.showOpenFilePicker();
+                    // self.pdf = pdfjsLib.getDocument(selectedPdfFile.name);
+
+                    FileSelectionDialog.dom.showModal();
+                  }
+                },
+                "Open PDF file"
+              ) : m("p", "<Opened PDF file>"),
+              FileSelectionDialog
+            ]
+          );
+        }
+      };
+
+      let Terminal = {
+        view: function() {
+          return m(".terminal");
+        }
+      };
+
+      m.route(
+        document.getElementById("root"),
+        "/pdf-viewer",
+        {
+          "/pdf-viewer": PdfViewer,
+          "/terminal": Terminal
+        }
+      );
+    </script>
+  </body>
+</html>

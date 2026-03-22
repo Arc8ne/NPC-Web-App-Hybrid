@@ -1,0 +1,6 @@
+{
+  "private": true,
+  "scripts": {
+    "start": "msedge --args --disable-web-security --user-data-dir=%INIT_CWD%/temp-msedge-profile %INIT_CWD%/index.html"
+  }
+}
