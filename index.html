@@ -34,7 +34,22 @@
     <!-- PDF.js Display layer -->
     <script type="module" src="https://unpkg.com/pdfjs-dist/build/pdf.mjs"></script>
 
+    <!-- Tesseract.js - For performing OCR operations on images (including browser canvases) -->
+    <script src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'></script>
+
     <script type="module">
+      function getCurrentFilePath() {
+        let currentFilePath = window.location.href.replace("file:///", "").split("#")[0];
+        return currentFilePath;
+      }
+
+      function getCurrentFolderPath() {
+        let currentFilePath = getCurrentFilePath();
+        let lastPathSepIndex = currentFilePath.lastIndexOf("/");
+        let currentFolderPath = currentFilePath.substring(0, lastPathSepIndex);
+        return currentFolderPath;
+      }
+
       let FileSelectionDialog = {
         selectionModes: ["Specify a file path", "Drag & drop a file"],
         selectionMode: undefined,
@@ -150,14 +165,13 @@
                 pdfPage => m(
                   "canvas",
                   {
-                    oncreate: pdfPageCanvasVnode => {
+                    oncreate: async (pdfPageCanvasVnode) => {
                       let viewport = pdfPage.getViewport(
                         {
                           scale: 1
                         }
                       );
-                      // For supporting HiDPI screens.
-                      let outputScale = window.devicePixelRatio || 1;
+                      let outputScale = window.devicePixelRatio || 1; // For supporting HiDPI screens.
                       pdfPageCanvasVnode.dom.width = Math.floor(viewport.width * outputScale);
                       pdfPageCanvasVnode.dom.height = Math.floor(viewport.height * outputScale);
                       pdfPageCanvasVnode.dom.style.width = `${Math.floor(viewport.width)}px`;
@@ -169,6 +183,20 @@
                           viewport
                         }
                       );
+
+                      // DBG SCT
+                      let pdfPageTesseractWorker = await Tesseract.createWorker(
+                        "eng",
+                        1,
+                        {
+                          langPath: `${getCurrentFolderPath()}/tesseract-training-data`,
+                          gzip: false
+                        }
+                      );
+                      let result = await pdfPageTesseractWorker.recognize(pdfPageCanvasVnode.dom);
+                      console.log("[DBG] Results of Tesseract.js recognition task:");
+                      console.log(result);
+                      await pdfPageTesseractWorker.terminate();
                     }
                   }
                 )
