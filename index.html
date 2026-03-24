@@ -14,6 +14,16 @@
       #root {
         padding: 8px;
       }
+
+      .pdf-viewer {
+        display: flex;
+        flex-direction: column;
+        row-gap: 8px;
+
+        .open-pdf-file-button {
+          width: fit-content;
+        }
+      }
     </style>
   </head>
   <body id="root">
@@ -24,74 +34,153 @@
     <!-- PDF.js Display layer -->
     <script type="module" src="https://unpkg.com/pdfjs-dist/build/pdf.mjs"></script>
 
-    <script>
-      let PdfViewer = {
-        pdf: null,
-        view: function() {
-          let FileSelectionDialog = {
-            selectionModes: ["Specify a file path", "Drag & drop a file"],
-            selectionMode: undefined,
-            view: function() {
-              return m(
-                "dialog",
+    <script type="module">
+      let FileSelectionDialog = {
+        selectionModes: ["Specify a file path", "Drag & drop a file"],
+        selectionMode: undefined,
+        filePath: "",
+        view: (vnode) => {
+          return m(
+            "dialog",
+            [
+              m(
+                "div",
                 [
+                  m("p", "Selection mode:"),
                   m(
-                    "div",
+                    "select",
+                    {
+                      value: vnode.state.selectionMode,
+                      onchange: e => {
+                        vnode.state.selectionMode = e.target.value;
+                      }
+                    },
+                    FileSelectionDialog.selectionModes.map(
+                      option => m("option", option)
+                    )
+                  ),
+                  vnode.state.selectionMode == FileSelectionDialog.selectionModes[0] ? m(
+                    "",
+                    m("p", "File path:"),
+                    m(
+                      "input",
+                      {
+                        value: vnode.state.filePath,
+                        onchange: e => {
+                          vnode.state.filePath = e.target.value;
+                        }
+                      }
+                    )
+                  ) : m(""),
+                  m(
+                    "",
                     [
-                      m("p", "Selection mode:"),
                       m(
-                        "select",
+                        "button",
                         {
-                          onchange: function (selectedSelectionMode) {
-                            self.selectionMode = selectedSelectionMode;
+                          onmouseup: () => {
+                            vnode.attrs.onFilePathConfirmed(vnode.state.filePath);
+                            vnode.dom.close();
                           }
                         },
-                        self.selectionModes.map(
-                          option => m("option", option)
-                        )
+                        "Ok"
                       ),
-                      self.selectionMode == self.selectionModes[0] ? m(
-                        "",
-                        m("p", "File path:"),
-                        m(
-                          "input",
-                          {
-                            type: "text"
+                      m(
+                        "button",
+                        {
+                          onmouseup: () => {
+                            vnode.dom.close();
                           }
-                        )
-                      ) : m("")
+                        },
+                        "Cancel"
+                      )
                     ]
                   )
                 ]
-              );
-            }
-          };
-          FileSelectionDialog.selectionMode = FileSelectionDialog.selectionModes[0];
+              )
+            ]
+          );
+        }
+      };
+      FileSelectionDialog.selectionMode = FileSelectionDialog.selectionModes[0];
 
+      let PdfViewer = {
+        pdf: null,
+        pdfPages: [],
+        isLoading: false,
+        view: vnode => {
+          let pdfCanvas = m(
+            "canvas",
+            {
+              style: {
+                display: vnode.state.pdf == null ? "none" : undefined
+              }
+            }
+          );
+          let fileSelectionDialog = m(
+            FileSelectionDialog,
+            {
+              onFilePathConfirmed: async (pdfFilePath) => {
+                vnode.state.isLoading = true;
+                vnode.state.pdf = await pdfjsLib.getDocument(`file:///${pdfFilePath}`).promise;
+                vnode.state.isLoading = false;
+                vnode.state.pdfPages = [];
+                for (let pageNumber = 1; pageNumber <= vnode.state.pdf.numPages; pageNumber++) {
+                  let page = await vnode.state.pdf.getPage(pageNumber);
+                  vnode.state.pdfPages.push(page);
+                }
+                m.redraw();
+              }
+            }
+          );
           return m(
             ".pdf-viewer",
             [
               m("h1", "PDF viewer"),
-              self.pdf == null ? m(
-                "button",
+              vnode.state.isLoading == false ? m(
+                "button.open-pdf-file-button",
                 {
-                  onmousedown: function() {
-                    // let selectedPdfFileHandle = await window.showOpenFilePicker();
-                    // self.pdf = pdfjsLib.getDocument(selectedPdfFile.name);
-
-                    FileSelectionDialog.dom.showModal();
+                  onmousedown: () => {
+                    fileSelectionDialog.dom.showModal();
                   }
                 },
                 "Open PDF file"
-              ) : m("p", "<Opened PDF file>"),
-              FileSelectionDialog
+              ) : m("p", "Loading PDF file..."),
+              ...vnode.state.pdfPages.map(
+                pdfPage => m(
+                  "canvas",
+                  {
+                    oncreate: pdfPageCanvasVnode => {
+                      let viewport = pdfPage.getViewport(
+                        {
+                          scale: 1
+                        }
+                      );
+                      // For supporting HiDPI screens.
+                      let outputScale = window.devicePixelRatio || 1;
+                      pdfPageCanvasVnode.dom.width = Math.floor(viewport.width * outputScale);
+                      pdfPageCanvasVnode.dom.height = Math.floor(viewport.height * outputScale);
+                      pdfPageCanvasVnode.dom.style.width = `${Math.floor(viewport.width)}px`;
+                      pdfPageCanvasVnode.dom.style.height = `${Math.floor(viewport.height)}px`;
+                      pdfPage.render(
+                        {
+                          canvasContext: pdfPageCanvasVnode.dom.getContext("2d"),
+                          transform: outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null,
+                          viewport
+                        }
+                      );
+                    }
+                  }
+                )
+              ),
+              fileSelectionDialog
             ]
           );
         }
       };
 
       let Terminal = {
-        view: function() {
+        view: () => {
           return m(".terminal");
         }
       };
