@@ -166,6 +166,7 @@
                   "canvas",
                   {
                     oncreate: async (pdfPageCanvasVnode) => {
+                      // Render the PDF page.
                       let viewport = pdfPage.getViewport(
                         {
                           scale: 1
@@ -184,7 +185,7 @@
                         }
                       );
 
-                      // DBG SCT
+                      // Extract all text from the PDF page via OCR.
                       let pdfPageTesseractWorker = await Tesseract.createWorker(
                         "eng",
                         1,
