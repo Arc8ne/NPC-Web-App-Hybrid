@@ -1,0 +1,1 @@
+& "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --disable-web-security --user-data-dir="$PSScriptRoot\temp-msedge-profile" "$PSScriptRoot\index.html"

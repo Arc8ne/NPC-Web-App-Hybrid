@@ -3,22 +3,53 @@
   <head>
     <title>NSPAC Web App</title>
     <style>
-      body {
-        font-family: Gordita, Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
-        padding: 8px;
-      }
-
       * {
         margin: 0px;
+      }
+
+      body {
+        font-family: Gordita, Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+        height: 100vh;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        row-gap: 8px;
+      }
+
+      dialog::backdrop {
+        background-color: rgba(1, 1, 1, 0.5);
+      }
+
+      .input-field {
+        display: flex;
+        flex-direction: column;
+        row-gap: 4px;
+      }
+
+      .nav-bar {
+        display: flex;
+        flex-direction: row;
+        column-gap: 8px;
+        align-items: center;
+        border-style: solid;
+        border-color: black;
+        border-width: 1px;
+        padding: 8px;
       }
 
       .pdf-viewer {
         display: flex;
         flex-direction: column;
         row-gap: 8px;
+        height: 100%;
+        padding: 0px 8px 8px 8px;
 
         .open-pdf-file-button {
           width: fit-content;
+        }
+
+        dialog {
+          margin: auto;
         }
       }
     </style>
@@ -49,7 +80,7 @@
     <script type="module">
       import html from "solid-js/html";
       import { render } from "solid-js/web";
-      import { HashRouter, Route, Navigate } from "@solidjs/router";
+      import { HashRouter, Route, Navigate, A } from "@solidjs/router";
       import { createSignal, Show, For } from "solid-js";
 
       function getCurrentFilePath() {
@@ -62,6 +93,17 @@
         let lastPathSepIndex = currentFilePath.lastIndexOf("/");
         let currentFolderPath = currentFilePath.substring(0, lastPathSepIndex);
         return currentFolderPath;
+      }
+
+      function PageWrapper(props) {
+        return html`
+          <div class="nav-bar">
+            <h1>NSPAC</h1>
+            <${A} href="/pdf-viewer">PDF Viewer<//>
+            <${A} href="/terminal">Terminal<//>
+          </div>
+          ${props.children}
+        `;
       }
 
       // let FileSelectionDialog = {
@@ -134,8 +176,6 @@
       // FileSelectionDialog.selectionMode = FileSelectionDialog.selectionModes[0];
       // Solid.js implementation
       function FileSelectionDialog(props) {
-        const selectionModes = ["Specify a file path", "Drag & drop a file"];
-        const [selectionMode, setSelectionMode] = createSignal(selectionModes[0]);
         const [filePath, setFilePath] = createSignal("");
         let rootRef;
         return html`
@@ -147,44 +187,77 @@
               }
             }
           >
-            <div>
-              <p>Selection mode:</p>
-              <select
-                value=${selectionMode()}
-                onChange=${
-                  (e) => setSelectionMode(e.target.value)
+            <div
+              style=${
+                {
+                  "display": "flex",
+                  "flex-direction": "column",
+                  "row-gap": "8px"
                 }
-              >
-                <${For} each=${selectionModes}>
-                  ${
-                    (selectionMode) => html`<option value=${selectionMode}>${selectionMode}</option>`
+              }
+            >
+              <div
+                style=${
+                  {
+                    "border-style": "solid",
+                    "border-color": "black",
+                    "border-width": "1px",
+                    "padding": "64px"
                   }
-                <//>
-              </select>
-              <${Show}
-                when=${() => selectionMode() == selectionModes[0]}
-                fallback=${
-                  html`<div></div>`
+                }
+                onDragOver=${
+                  (e) => e.preventDefault()
+                }
+                onDrop=${
+                  async (e) => {
+                    e.preventDefault();
+                    let droppedFile = e.dataTransfer.files[0];
+                    let droppedFileBytes = await droppedFile.arrayBuffer();
+                    props.onFileSelected(droppedFileBytes);
+                    rootRef.close();
+                  }
                 }
               >
-                <div>
-                  <p>File path:</p>
-                  <input
-                    value=${filePath()}
-                    onChange=${
-                      (e) => {
-                        setFilePath(e.target.value);
-                      }
+                <span>Drag & drop a PDF file here</span>
+              </div>
+              <p
+                style=${
+                  {
+                    "text-align": "center"
+                  }
+                }
+              >--- or ---</p>
+              <div class="input-field">
+                <p>File path</p>
+                <input
+                  value=${filePath()}
+                  onChange=${
+                    (e) => {
+                      setFilePath(e.target.value);
                     }
-                  />
-                </div>
-              <//>
-              <div>
+                  }
+                />
+              </div>
+              <div
+                style=${
+                  {
+                    "display": "flex",
+                    "flex-direction": "row",
+                    "column-gap": "8px",
+                    "justify-content": "right"
+                  }
+                }
+              >
                 <button
                   onMouseUp=${
-                    (e) => {
-                      props.onFilePathConfirmed(
-                        filePath()
+                    async (e) => {
+                      let fileFetchResponse = await fetch(`file:///${filePath()}`);
+                      if (!fileFetchResponse.ok) {
+                        // TODO: Show a message indicating that no file at the specified path could be found.
+                        throw new Error("The file at the specified path could not be found.");
+                      }
+                      props.onFileSelected(
+                        await fileFetchResponse.arrayBuffer()
                       );
                       rootRef.close();
                     }
@@ -298,9 +371,9 @@
         let fileSelectionDialogRef;
         return html`
           <div class="pdf-viewer">
-            <h1>PDF Viewer</h1>
+            <h2>PDF Viewer</h2>
             <${Show}
-              when=${() => isLoading() == false}
+              when=${() => !isLoading()}
               fallback=${html`<p>Loading PDF file...</p>`}
             >
               <button
@@ -363,11 +436,15 @@
             <//>
             <${FileSelectionDialog}
               ref=${(someRef) => fileSelectionDialogRef = someRef}
-              onFilePathConfirmed=${
-                async (pdfFilePath) => {
+              onFileSelected=${
+                async (pdfFileData) => {
                   setIsLoading(true);
                   setPdf(
-                    await pdfjsLib.getDocument(`file:///${pdfFilePath}`).promise
+                    await pdfjsLib.getDocument(
+                      {
+                        data: pdfFileData
+                      }
+                    ).promise
                   );
                   setIsLoading(false);
                   let currentPdfPages = [];
@@ -397,7 +474,7 @@
       function App() {
         const defaultPath = "/pdf-viewer";
         return html`
-          <${HashRouter}>
+          <${HashRouter} root=${PageWrapper}>
             <${Route}
               path="/"
               component=${
