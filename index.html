@@ -100,83 +100,17 @@
           <div class="nav-bar">
             <h1>NSPAC</h1>
             <${A} href="/pdf-viewer">PDF Viewer<//>
+            <${A} href="/filesystem-searcher">Filesystem Searcher<//>
             <${A} href="/terminal">Terminal<//>
           </div>
           ${props.children}
         `;
       }
 
-      // let FileSelectionDialog = {
-      //   selectionModes: ["Specify a file path", "Drag & drop a file"],
-      //   selectionMode: undefined,
-      //   filePath: "",
-      //   view: (vnode) => {
-      //     return m(
-      //       "dialog",
-      //       [
-      //         m(
-      //           "div",
-      //           [
-      //             m("p", "Selection mode:"),
-      //             m(
-      //               "select",
-      //               {
-      //                 value: vnode.state.selectionMode,
-      //                 onchange: e => {
-      //                   vnode.state.selectionMode = e.target.value;
-      //                 }
-      //               },
-      //               FileSelectionDialog.selectionModes.map(
-      //                 option => m("option", option)
-      //               )
-      //             ),
-      //             vnode.state.selectionMode == FileSelectionDialog.selectionModes[0] ? m(
-      //               "",
-      //               m("p", "File path:"),
-      //               m(
-      //                 "input",
-      //                 {
-      //                   value: vnode.state.filePath,
-      //                   onchange: e => {
-      //                     vnode.state.filePath = e.target.value;
-      //                   }
-      //                 }
-      //               )
-      //             ) : m(""),
-      //             m(
-      //               "",
-      //               [
-      //                 m(
-      //                   "button",
-      //                   {
-      //                     onmouseup: () => {
-      //                       vnode.attrs.onFilePathConfirmed(vnode.state.filePath);
-      //                       vnode.dom.close();
-      //                     }
-      //                   },
-      //                   "Ok"
-      //                 ),
-      //                 m(
-      //                   "button",
-      //                   {
-      //                     onmouseup: () => {
-      //                       vnode.dom.close();
-      //                     }
-      //                   },
-      //                   "Cancel"
-      //                 )
-      //               ]
-      //             )
-      //           ]
-      //         )
-      //       ]
-      //     );
-      //   }
-      // };
-      // FileSelectionDialog.selectionMode = FileSelectionDialog.selectionModes[0];
-      // Solid.js implementation
       function FileSelectionDialog(props) {
         const [filePath, setFilePath] = createSignal("");
+        const [showFolderSelectedError, setShowFolderSelectedError] = createSignal(false);
+        const [showFileNotFoundError, setShowFileNotFoundError] = createSignal(false);
         let rootRef;
         return html`
           <dialog
@@ -212,13 +146,26 @@
                   async (e) => {
                     e.preventDefault();
                     let droppedFile = e.dataTransfer.files[0];
-                    let droppedFileBytes = await droppedFile.arrayBuffer();
+                    let droppedFileBytes = null;
+                    try {
+                      droppedFileBytes = await droppedFile.arrayBuffer();
+                    } catch (error) {
+                      // This code path will be reached if a folder is dragged over this PDF file upload area.
+                      console.error(error);
+                      return;
+                    }
                     props.onFileSelected(droppedFileBytes);
                     rootRef.close();
                   }
                 }
               >
-                <span>Drag & drop a PDF file here</span>
+                <p
+                  style=${
+                    {
+                      "text-align": "center"
+                    }
+                  }
+                >Drag & drop a PDF file here</p>
               </div>
               <p
                 style=${
@@ -230,6 +177,7 @@
               <div class="input-field">
                 <p>File path</p>
                 <input
+                  placeholder="Enter the path to the PDF file here"
                   value=${filePath()}
                   onChange=${
                     (e) => {
@@ -251,10 +199,19 @@
                 <button
                   onMouseUp=${
                     async (e) => {
-                      let fileFetchResponse = await fetch(`file:///${filePath()}`);
+                      let fileFetchResponse = null;
+                      try {
+                        // If a file path is entered but it does not point to an existing file, then this line will throw an exception.
+                        fileFetchResponse = await fetch(`file:///${filePath()}`);
+                      } catch (error) {
+                        setShowFileNotFoundError(true);
+                        console.error(error);
+                        return;
+                      }
                       if (!fileFetchResponse.ok) {
-                        // TODO: Show a message indicating that no file at the specified path could be found.
-                        throw new Error("The file at the specified path could not be found.");
+                        // This code path will be reached if no file path (i.e. a blank value) is entered.
+                        setShowFileNotFoundError(true);
+                        return;
                       }
                       props.onFileSelected(
                         await fileFetchResponse.arrayBuffer()
@@ -271,6 +228,42 @@
                   }
                 >Cancel</button>
               </div>
+              <${Show}
+                when=${showFileNotFoundError}
+              >
+                <div
+                  style=${
+                    {
+                      "display": "flex",
+                      "flex-direction": "row",
+                      "justify-content": "space-between",
+                      "align-items": "center",
+                      "background-color": "#D32F2F",
+                      "color": "white",
+                      "padding": "8px"
+                    }
+                  }
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-circle-x-icon lucide-circle-x"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
+                  <p
+                    style=${
+                      {
+                        "margin-left": "8px"
+                      }
+                    }
+                  >The specified file could not be found.</p>
+                  <button
+                    style=${
+                      {
+                        "margin-left": "32px"
+                      }
+                    }
+                    onMouseUp=${
+                      (e) => setShowFileNotFoundError(false)
+                    }
+                  >Ok</button>
+                </div>
+              <//>
             </div>
           </dialog>
         `;
@@ -466,8 +459,26 @@
 
       function NotFound() {
         return html`
-          <h1>404 - Not Found</h1>
+          <h2>404 - Not Found</h2>
           <p>The requested page could not be found.</p>
+        `;
+      }
+
+      function NotImplementedYet() {
+        return html`
+          <div
+            style=${
+              {
+                "display": "flex",
+                "flex-direction": "column",
+                "row-gap": "8px",
+                "padding": "8px"
+              }
+            }
+          >
+            <h2>:(</h2>
+            <p>This feature has not been implemented yet.</p>
+          </div>
         `;
       }
 
@@ -482,6 +493,8 @@
               }
             />
             <${Route} path="/pdf-viewer" component=${() => PdfViewer}/>
+            // TODO: Implement this.
+            <${Route} path="/filesystem-searcher" component=${() => NotImplementedYet}/>
             <${Route} path="/terminal" component=${() => Terminal}/>
             <${Route} path="*" component=${() => NotFound}/>
           <//>
