@@ -13,7 +13,8 @@
         box-sizing: border-box;
         display: flex;
         flex-direction: column;
-        row-gap: 8px;
+        row-gap: 0px;
+        overflow-y: clip;
       }
 
       dialog::backdrop {
@@ -42,7 +43,7 @@
         flex-direction: column;
         row-gap: 8px;
         height: 100%;
-        padding: 0px 8px 8px 8px;
+        padding: 8px;
 
         .open-pdf-file-button {
           width: fit-content;
@@ -109,8 +110,7 @@
 
       function FileSelectionDialog(props) {
         const [filePath, setFilePath] = createSignal("");
-        const [showFolderSelectedError, setShowFolderSelectedError] = createSignal(false);
-        const [showFileNotFoundError, setShowFileNotFoundError] = createSignal(false);
+        const [errorMessage, setErrorMessage] = createSignal(null);
         let rootRef;
         return html`
           <dialog
@@ -150,7 +150,8 @@
                     try {
                       droppedFileBytes = await droppedFile.arrayBuffer();
                     } catch (error) {
-                      // This code path will be reached if a folder is dragged over this PDF file upload area.
+                      // This code path will be reached if a folder is dragged over this element.
+                      setErrorMessage("A folder was selected instead of a PDF file.");
                       console.error(error);
                       return;
                     }
@@ -204,13 +205,13 @@
                         // If a file path is entered but it does not point to an existing file, then this line will throw an exception.
                         fileFetchResponse = await fetch(`file:///${filePath()}`);
                       } catch (error) {
-                        setShowFileNotFoundError(true);
+                        setErrorMessage("The specified file could not be found.");
                         console.error(error);
                         return;
                       }
                       if (!fileFetchResponse.ok) {
                         // This code path will be reached if no file path (i.e. a blank value) is entered.
-                        setShowFileNotFoundError(true);
+                        setErrorMessage("Enter a path to a PDF file or drag & drop a PDF file over the designated area.");
                         return;
                       }
                       props.onFileSelected(
@@ -229,7 +230,7 @@
                 >Cancel</button>
               </div>
               <${Show}
-                when=${showFileNotFoundError}
+                when=${errorMessage}
               >
                 <div
                   style=${
@@ -251,7 +252,7 @@
                         "margin-left": "8px"
                       }
                     }
-                  >The specified file could not be found.</p>
+                  >${errorMessage}</p>
                   <button
                     style=${
                       {
@@ -259,7 +260,7 @@
                       }
                     }
                     onMouseUp=${
-                      (e) => setShowFileNotFoundError(false)
+                      (e) => setErrorMessage(null)
                     }
                   >Ok</button>
                 </div>
@@ -269,94 +270,26 @@
         `;
       }
 
-      // let PdfViewer = {
-      //   pdf: null,
-      //   pdfPages: [],
-      //   isLoading: false,
-      //   view: vnode => {
-      //     let pdfCanvas = m(
-      //       "canvas",
-      //       {
-      //         style: {
-      //           display: vnode.state.pdf == null ? "none" : undefined
-      //         }
-      //       }
-      //     );
-      //     let fileSelectionDialog = m(
-      //       FileSelectionDialog,
-      //       {
-      //         onFilePathConfirmed: async (pdfFilePath) => {
-      //           vnode.state.isLoading = true;
-      //           vnode.state.pdf = await pdfjsLib.getDocument(`file:///${pdfFilePath}`).promise;
-      //           vnode.state.isLoading = false;
-      //           vnode.state.pdfPages = [];
-      //           for (let pageNumber = 1; pageNumber <= vnode.state.pdf.numPages; pageNumber++) {
-      //             let page = await vnode.state.pdf.getPage(pageNumber);
-      //             vnode.state.pdfPages.push(page);
-      //           }
-      //           m.redraw();
-      //         }
-      //       }
-      //     );
-      //     return m(
-      //       ".pdf-viewer",
-      //       [
-      //         m("h1", "PDF viewer"),
-      //         vnode.state.isLoading == false ? m(
-      //           "button.open-pdf-file-button",
-      //           {
-      //             onmousedown: () => {
-      //               fileSelectionDialog.dom.showModal();
-      //             }
-      //           },
-      //           "Open PDF file"
-      //         ) : m("p", "Loading PDF file..."),
-      //         ...vnode.state.pdfPages.map(
-      //           pdfPage => m(
-      //             "canvas",
-      //             {
-      //               oncreate: async (pdfPageCanvasVnode) => {
-      //                 // Render the PDF page.
-      //                 let viewport = pdfPage.getViewport(
-      //                   {
-      //                     scale: 1
-      //                   }
-      //                 );
-      //                 let outputScale = window.devicePixelRatio || 1; // For supporting HiDPI screens.
-      //                 pdfPageCanvasVnode.dom.width = Math.floor(viewport.width * outputScale);
-      //                 pdfPageCanvasVnode.dom.height = Math.floor(viewport.height * outputScale);
-      //                 pdfPageCanvasVnode.dom.style.width = `${Math.floor(viewport.width)}px`;
-      //                 pdfPageCanvasVnode.dom.style.height = `${Math.floor(viewport.height)}px`;
-      //                 pdfPage.render(
-      //                   {
-      //                     canvasContext: pdfPageCanvasVnode.dom.getContext("2d"),
-      //                     transform: outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null,
-      //                     viewport
-      //                   }
-      //                 );
+      function renderPdfPageToCanvas(pdfPage, canvas) {
+        let viewport = pdfPage.getViewport(
+          {
+            scale: 1
+          }
+        );
+        let outputScale = window.devicePixelRatio || 1; // For supporting HiDPI screens
+        canvas.width = Math.floor(viewport.width * outputScale);
+        canvas.height = Math.floor(viewport.height * outputScale);
+        canvas.style.width = `${Math.floor(viewport.width)}px`;
+        canvas.style.height = `${Math.floor(viewport.height)}px`;
+        pdfPage.render(
+          {
+            canvasContext: canvas.getContext("2d"),
+            transform: outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null,
+            viewport
+          }
+        );
+      }
 
-      //                 // Extract all text from the PDF page via OCR.
-      //                 let pdfPageTesseractWorker = await Tesseract.createWorker(
-      //                   "eng",
-      //                   1,
-      //                   {
-      //                     langPath: `${getCurrentFolderPath()}/tesseract-training-data`,
-      //                     gzip: false
-      //                   }
-      //                 );
-      //                 let result = await pdfPageTesseractWorker.recognize(pdfPageCanvasVnode.dom);
-      //                 console.log("[DBG] Results of Tesseract.js recognition task:");
-      //                 console.log(result);
-      //                 await pdfPageTesseractWorker.terminate();
-      //               }
-      //             }
-      //           )
-      //         ),
-      //         fileSelectionDialog
-      //       ]
-      //     );
-      //   }
-      // };
       function PdfViewer() {
         const [pdf, setPdf] = createSignal(null);
         const [pdfPages, setPdfPages] = createSignal([]);
@@ -372,61 +305,64 @@
               <button
                 class="open-pdf-file-button"
                 onMouseDown=${
-                  (e) => {
-                    fileSelectionDialogRef.showModal();
-                  }
+                  (e) => fileSelectionDialogRef.showModal()
                 }
               >Open PDF file</button>
             <//>
-            <${For}
-              each=${() => pdfPages()}
-            >
-              ${
-                (pdfPage) => html`
-                  <canvas
-                    ref=${
-                      async (pdfPageCanvas) => {
-                        // Render the PDF page.
-                        let viewport = pdfPage.getViewport(
-                          {
-                            scale: 1
-                          }
-                        );
-                        let outputScale = window.devicePixelRatio || 1; // For supporting HiDPI screens
-                        pdfPageCanvas.width = Math.floor(viewport.width * outputScale);
-                        pdfPageCanvas.height = Math.floor(viewport.height * outputScale);
-                        pdfPageCanvas.style.width = `${Math.floor(viewport.width)}px`;
-                        pdfPageCanvas.style.height = `${Math.floor(viewport.height)}px`;
-                        pdfPage.render(
-                          {
-                            canvasContext: pdfPageCanvas.getContext("2d"),
-                            transform: outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null,
-                            viewport
-                          }
-                        );
-
-                        // Extract all text from the PDF page via OCR.
-                        let pdfPageTesseractWorker = await Tesseract.createWorker(
-                          "eng",
-                          1,
-                          {
-                            langPath: `${getCurrentFolderPath()}/tesseract-training-data`,
-                            gzip: false
-                          }
-                        );
-                        let result = await pdfPageTesseractWorker.recognize(pdfPageCanvas);
-
-                        // DBG SCT
-                        console.log("[DBG] Results of Tesseract.js recognition task:");
-                        console.log(result);
-
-                        await pdfPageTesseractWorker.terminate();
-                      }
-                    }
-                  />
-                `
+            <div
+              class="pdf-pages-canvases"
+              style=${
+                {
+                  "display": "flex",
+                  "flex-direction": "column",
+                  "row-gap": "8px",
+                  "align-items": "center",
+                  "padding": "0px 0px 8px 0px",
+                  "height": "79%",
+                  "overflow-y": "auto"
+                }
               }
-            <//>
+            >
+              <${For}
+                each=${pdfPages}
+              >
+                ${
+                  (pdfPage) => html`
+                    <canvas
+                      style=${
+                        {
+                          "border-style": "solid",
+                          "border-width": "1px",
+                          "border-color": "black"
+                        }
+                      }
+                      ref=${
+                        async (pdfPageCanvas) => {
+                          renderPdfPageToCanvas(pdfPage, pdfPageCanvas);
+
+                          // Extract all text from the PDF page via OCR.
+                          let pdfPageTesseractWorker = await Tesseract.createWorker(
+                            "eng",
+                            1,
+                            {
+                              langPath: `${getCurrentFolderPath()}/tesseract-training-data`,
+                              gzip: false
+                            }
+                          );
+                          let result = await pdfPageTesseractWorker.recognize(pdfPageCanvas);
+
+                          // DBG SCT
+                          console.log("[DBG] Results of Tesseract.js recognition task:");
+                          console.log(result);
+
+                          await pdfPageTesseractWorker.terminate();
+                        }
+                      }
+                    />
+                  `
+                }
+              <//>
+            </div>
             <${FileSelectionDialog}
               ref=${(someRef) => fileSelectionDialogRef = someRef}
               onFileSelected=${
@@ -459,8 +395,19 @@
 
       function NotFound() {
         return html`
-          <h2>404 - Not Found</h2>
-          <p>The requested page could not be found.</p>
+          <div
+            style=${
+              {
+                "display": "flex",
+                "flex-direction": "column",
+                "row-gap": "8px",
+                "padding": "8px"
+              }
+            }
+          >
+            <h2>404 - Not Found</h2>
+            <p>The requested page could not be found.</p>
+          </div>
         `;
       }
 
