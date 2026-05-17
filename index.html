@@ -45,8 +45,17 @@
         height: 100%;
         padding: 8px;
 
-        .open-pdf-file-button {
+        .open-pdf-file-button, .close-pdf-file-button {
           width: fit-content;
+        }
+
+        .pdf-pages-canvases {
+          .text-layer {
+            span {
+              position: relative;
+              color: red;
+            }
+          }
         }
 
         dialog {
@@ -58,14 +67,7 @@
   <body>
     <noscript>JavaScript must be enabled.</noscript>
 
-    <!-- PDF.js Core layer -->
-    <script type="module" src="https://unpkg.com/pdfjs-dist/build/pdf.worker.mjs"></script>
-    <!-- PDF.js Display layer -->
-    <script type="module" src="https://unpkg.com/pdfjs-dist/build/pdf.mjs"></script>
-
-    <!-- Tesseract.js - For performing OCR operations on images (including browser canvases) -->
-    <script src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'></script>
-
+    <!-- tesseract.js - For performing OCR operations on images (including browser canvases) -->
     <script type="importmap">
       {
         "imports": {
@@ -73,7 +75,9 @@
           "solid-js/web": "https://cdn.jsdelivr.net/npm/solid-js@1.9.12/web/+esm",
           "solid-js/html": "https://cdn.jsdelivr.net/npm/solid-js@1.9.12/html/+esm",
           "solid-js/store": "https://cdn.jsdelivr.net/npm/solid-js@1.9.12/store/+esm",
-          "@solidjs/router": "https://cdn.jsdelivr.net/npm/@solidjs/router@0.16.1/dist/index.min.js"
+          "@solidjs/router": "https://cdn.jsdelivr.net/npm/@solidjs/router@0.16.1/dist/index.min.js",
+          "pdf.js": "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.7.284/+esm",
+          "tesseract.js": "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.esm.min.js"
         }
       }
     </script>
@@ -82,7 +86,12 @@
       import html from "solid-js/html";
       import { render } from "solid-js/web";
       import { HashRouter, Route, Navigate, A } from "@solidjs/router";
-      import { createSignal, Show, For } from "solid-js";
+      import { createSignal, Show, For, Switch, Match } from "solid-js";
+      import { createStore } from "solid-js/store";
+      import * as pdfLib from "pdf.js";
+      import tesseract from "tesseract.js";
+
+      pdfLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.7.284/build/pdf.worker.mjs";
 
       function getCurrentFilePath() {
         let currentFilePath = window.location.href.replace("file:///", "").split("#")[0];
@@ -151,7 +160,7 @@
                       droppedFileBytes = await droppedFile.arrayBuffer();
                     } catch (error) {
                       // This code path will be reached if a folder is dragged over this element.
-                      setErrorMessage("A folder was selected instead of a PDF file.");
+                      setErrorMessage("A folder was selected instead of a file.");
                       console.error(error);
                       return;
                     }
@@ -166,8 +175,34 @@
                       "text-align": "center"
                     }
                   }
-                >Drag & drop a PDF file here</p>
+                >Drag & drop a file here</p>
               </div>
+              <p
+                style=${
+                  {
+                    "text-align": "center"
+                  }
+                }
+              >--- or ---</p>
+              <button
+                onMouseUp=${
+                  async (e) => {
+                    let selectedFileHandle = null;
+                    try {
+                      selectedFileHandle = (await window.showOpenFilePicker())[0];
+                    } catch (error) {
+                      if (error.name == "AbortError") {
+                        return;
+                      }
+                      console.error(error);
+                    }
+                    let selectedFile = await selectedFileHandle.getFile();
+                    let selectedFileBytes = await selectedFile.arrayBuffer();
+                    props.onFileSelected(selectedFileBytes);
+                    rootRef.close();
+                  }
+                }
+              >Select a file</button>
               <p
                 style=${
                   {
@@ -178,7 +213,7 @@
               <div class="input-field">
                 <p>File path</p>
                 <input
-                  placeholder="Enter the path to the PDF file here"
+                  placeholder="Enter a file's path here"
                   value=${filePath()}
                   onChange=${
                     (e) => {
@@ -211,7 +246,7 @@
                       }
                       if (!fileFetchResponse.ok) {
                         // This code path will be reached if no file path (i.e. a blank value) is entered.
-                        setErrorMessage("Enter a path to a PDF file or drag & drop a PDF file over the designated area.");
+                        setErrorMessage("No file was selected.");
                         return;
                       }
                       props.onFileSelected(
@@ -241,22 +276,17 @@
                       "align-items": "center",
                       "background-color": "#D32F2F",
                       "color": "white",
-                      "padding": "8px"
+                      "padding": "8px",
+                      "column-gap": "8px"
                     }
                   }
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-circle-x-icon lucide-circle-x"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
-                  <p
-                    style=${
-                      {
-                        "margin-left": "8px"
-                      }
-                    }
-                  >${errorMessage}</p>
+                  <p>${errorMessage}</p>
                   <button
                     style=${
                       {
-                        "margin-left": "32px"
+                        "margin-left": "auto"
                       }
                     }
                     onMouseUp=${
@@ -290,98 +320,141 @@
         );
       }
 
+      const [pdfViewerStore, setPdfViewerStore] = createStore(
+        {
+          // Can either be an array of PDF pages or 'loading' if a PDF's pages are being loaded.
+          pdfPages: []
+        }
+      );
+
       function PdfViewer() {
-        const [pdf, setPdf] = createSignal(null);
-        const [pdfPages, setPdfPages] = createSignal([]);
-        const [isLoading, setIsLoading] = createSignal(false);
         let fileSelectionDialogRef;
         return html`
           <div class="pdf-viewer">
             <h2>PDF Viewer</h2>
-            <${Show}
-              when=${() => !isLoading()}
-              fallback=${html`<p>Loading PDF file...</p>`}
-            >
-              <button
-                class="open-pdf-file-button"
-                onMouseDown=${
-                  (e) => fileSelectionDialogRef.showModal()
-                }
-              >Open PDF file</button>
-            <//>
-            <div
-              class="pdf-pages-canvases"
-              style=${
-                {
-                  "display": "flex",
-                  "flex-direction": "column",
-                  "row-gap": "8px",
-                  "align-items": "center",
-                  "padding": "0px 0px 8px 0px",
-                  "height": "79%",
-                  "overflow-y": "auto"
-                }
-              }
-            >
-              <${For}
-                each=${pdfPages}
-              >
-                ${
-                  (pdfPage) => html`
-                    <canvas
-                      style=${
-                        {
-                          "border-style": "solid",
-                          "border-width": "1px",
-                          "border-color": "black"
-                        }
-                      }
-                      ref=${
-                        async (pdfPageCanvas) => {
-                          renderPdfPageToCanvas(pdfPage, pdfPageCanvas);
-
-                          // Extract all text from the PDF page via OCR.
-                          let pdfPageTesseractWorker = await Tesseract.createWorker(
-                            "eng",
-                            1,
-                            {
-                              langPath: `${getCurrentFolderPath()}/tesseract-training-data`,
-                              gzip: false
-                            }
-                          );
-                          let result = await pdfPageTesseractWorker.recognize(pdfPageCanvas);
-
-                          // DBG SCT
-                          console.log("[DBG] Results of Tesseract.js recognition task:");
-                          console.log(result);
-
-                          await pdfPageTesseractWorker.terminate();
-                        }
-                      }
-                    />
-                  `
-                }
+            <${Switch}>
+              <${Match} when=${() => pdfViewerStore.pdfPages == "loading"}>
+                <p>Loading PDF file...</p>
               <//>
-            </div>
+              <${Match} when=${() => pdfViewerStore.pdfPages.length > 0}>
+                <button
+                  class="close-pdf-file-button"
+                  onMouseUp=${
+                    (e) => setPdfViewerStore("pdfPages", [])
+                  }
+                >Close</button>
+                <div
+                  class="pdf-pages-canvases"
+                  style=${
+                    {
+                      "display": "flex",
+                      "flex-direction": "column",
+                      "row-gap": "8px",
+                      "align-items": "center",
+                      "padding": "0px 0px 8px 0px",
+                      "height": "79%",
+                      "overflow-y": "auto"
+                    }
+                  }
+                >
+                  <${For}
+                    each=${() => pdfViewerStore.pdfPages}
+                  >
+                    ${
+                      (pdfPage) => html`
+                        <div
+                          class="page"
+                          style=${
+                            {
+                              "position": "relative"
+                            }
+                          }
+                        >
+                          <canvas
+                            style=${
+                              {
+                                "border-style": "solid",
+                                "border-width": "1px",
+                                "border-color": "black"
+                              }
+                            }
+                            ref=${
+                              async (pdfPageCanvas) => {
+                                renderPdfPageToCanvas(pdfPage, pdfPageCanvas);
+
+                                // Extract all text from the PDF page via OCR.
+                                let pdfPageTesseractWorker = await tesseract.createWorker(
+                                  "eng",
+                                  1,
+                                  {
+                                    langPath: `${getCurrentFolderPath()}/tesseract-training-data`,
+                                    gzip: false
+                                  }
+                                );
+                                let recognitionResult = await pdfPageTesseractWorker.recognize(pdfPageCanvas);
+                                await pdfPageTesseractWorker.terminate();
+                              }
+                            }
+                          />
+                          <div
+                            class="text-layer"
+                            style=${
+                              {
+                                "position": "absolute",
+                                "top": 0,
+                                "left": 0
+                              }
+                            }
+                            ref=${
+                              async (pdfPageTextLayerRef) => {
+                                // If the PDF is scanned (i.e. image-only) / contains no text content, then the `items` array in the returned object will be empty.
+                                let pdfPageTextContent = await pdfPage.getTextContent();
+                                let pdfPageTextLayer = new pdfLib.TextLayer(
+                                  {
+                                    textContentSource: pdfPageTextContent,
+                                    viewport: pdfPage.getViewport(
+                                      {
+                                        scale: 1
+                                      }
+                                    ),
+                                    container: pdfPageTextLayerRef
+                                  }
+                                );
+                                await pdfPageTextLayer.render();
+                              }
+                            }
+                          ></div>
+                        </div>
+                      `
+                    }
+                  <//>
+                </div>
+              <//>
+              <${Match} when=${true}>
+                <button
+                  class="open-pdf-file-button"
+                  onMouseUp=${
+                    (e) => fileSelectionDialogRef.showModal()
+                  }
+                >Open</button>
+              <//>
+            <//>
             <${FileSelectionDialog}
               ref=${(someRef) => fileSelectionDialogRef = someRef}
               onFileSelected=${
                 async (pdfFileData) => {
-                  setIsLoading(true);
-                  setPdf(
-                    await pdfjsLib.getDocument(
-                      {
-                        data: pdfFileData
-                      }
-                    ).promise
-                  );
-                  setIsLoading(false);
+                  setPdfViewerStore("pdfPages", "loading");
+                  let pdf = await pdfLib.getDocument(
+                    {
+                      data: pdfFileData
+                    }
+                  ).promise;
                   let currentPdfPages = [];
-                  for (let pageNumber = 1; pageNumber <= pdf().numPages; pageNumber++) {
-                    let page = await pdf().getPage(pageNumber);
+                  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+                    let page = await pdf.getPage(pageNumber);
                     currentPdfPages.push(page);
                   }
-                  setPdfPages(currentPdfPages);
+                  setPdfViewerStore("pdfPages", currentPdfPages);
                 }
               }
             />
@@ -442,7 +515,7 @@
             <${Route} path="/pdf-viewer" component=${() => PdfViewer}/>
             // TODO: Implement this.
             <${Route} path="/filesystem-searcher" component=${() => NotImplementedYet}/>
-            <${Route} path="/terminal" component=${() => Terminal}/>
+            <${Route} path="/terminal" component=${() => NotImplementedYet}/>
             <${Route} path="*" component=${() => NotFound}/>
           <//>
         `;
